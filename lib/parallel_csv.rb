@@ -4,7 +4,7 @@ class ParallelCSV
   DEFAULTS = {
     chunk_size: 5_000,
     col_sep: '¦',
-    process_num: 4 # Число процессов
+    process_num: 4 # Number of parallel processes
   }.freeze
 
   attr_reader :path, :options
@@ -15,12 +15,12 @@ class ParallelCSV
   end
 
   def process(&block)
-    # Если файл не читается, нужно кинуть эксепшн из родительского процесса
+    # Process exceptions in main process if somehing is wrong with the file
     File.open(path) { }
 
     offset = 0
 
-    # Пайп для статуса от дочерних процессов
+    # Pipe for getting EOF from child processes
     reader, writer = IO.pipe
     eof = false
 
@@ -36,8 +36,8 @@ class ParallelCSV
 
       pids.compact.each { |pid| Process.wait(pid) }
 
-      # Читаем из пайпа статус, избегая блокировки
-      # Если хотя бы один процесс кинул stop, останавливаемся
+      # Reading pipe in a non-blocking way
+      # If any process send 'stop', then stop
       eof = (IO.select([reader], [writer])[0].length > 0 && reader.gets == "stop\n")
     end
   end
@@ -49,25 +49,23 @@ class ParallelCSV
     csv = CSV.new(io, csv_options)
     chunk = []
 
-    # Проматываем до offset строки
+    # Fast forward
     offset.times { io.readline }
 
-    # Читаем chunk_size строк или пока не встретим EOF
+    # Read chunk_size of lines or until EOF
     options[:chunk_size].times do
       line = csv.readline
       chunk << line.fields if line
 
-      # Exception is not for control flow
       if io.eof?
         writer.puts 'stop'
         break
       end
     end
   rescue StandardError => e
-    # STDOUT.puts e.message
     writer.puts 'stop'
   ensure
-    # Что бы ни случилось, пытаемся отдать чанк
+    # Try to pass the chunk anyway
     yield chunk if block_given? && !chunk.empty?
   end
 
@@ -75,7 +73,7 @@ class ParallelCSV
     options.except(:process_num, :chunk_size)
   end
 
-  # Залепуха для RSpec
+  # For RSpec
   def fork_unless_test
     if Rails.env == 'test'
       yield
